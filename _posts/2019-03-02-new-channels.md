@@ -5,29 +5,33 @@ title:  "Proposal: New channels for Rust's standard library"
 
 Two exciting performance improvements are coming to Rust's standard library soon -
 we're replacing mutexes with [`parking_lot`](https://github.com/rust-lang/rust/pull/56410)
-and replacing the hash table with [`hashbrown`](https://github.com/rust-lang/rust/pull/56241).
+and replacing hash maps with [`hashbrown`](https://github.com/rust-lang/rust/pull/56241).
 The public interface will stay the same while the internal implementations are swapped
-for much faster ones. All Rust programs using those primitives magically get faster and
-everyone is happy. How wonderful is that!?
+out for much faster ones.
+All Rust programs using those primitives will therefore magically get faster, too!
 
-In this blog post, I'm proposing we similarly replace the guts of
+In this blog post, I'm proposing we also replace the guts of
 [`mpsc`](https://doc.rust-lang.org/std/sync/mpsc/index.html) with
 [`crossbeam-channel`](https://docs.rs/crossbeam-channel) for some more performance wins.
-However, unlike with mutexes and hash tables, this change will also enable important new
+However, unlike with mutexes and hash maps, this change will also enable oft-requested new
 features that make it tempting to deprecate `mpsc` altogether and introduce better
 channels designed from scratch.
 
 The `mpsc` channels are not perfect. We have
-[a number of regrets](https://github.com/rust-lang/rust/pull/42397#issuecomment-315867774)
+[a bunch of regrets](https://github.com/rust-lang/rust/pull/42397#issuecomment-315867774)
 over some decisions made before their stabilization. Now could be a good time to
 revisit those decisions and consider fixing the mistakes.
 
 # The dilemma 
 
-Just a quick reminder worth bringing up first. We've decided to
-remove the [`mpsc_select`](https://github.com/rust-lang/rust/issues/27800)
-feature from `mpsc` because it adds a lot of complexity that feels like
-shouldn't belong into the standard library. I fully support this decision
+Just a quick reminder worth bringing up first. Unstable feature 
+[`mpsc_select`](https://github.com/rust-lang/rust/issues/27800)
+was introduced in 2015 and we've decided to deprecate it in late 2018 with the
+intention of removing in a future Rust release.
+The reason is that it adds a lot of complexity that feels like
+shouldn't belong to the standard library. The feature never worked
+as well as we hoped and `crossbeam-channel` is a better alternative anyway.
+I fully support this decision
 as selection makes channels at least 2x more complex when measured in lines of
 code, and users who need selection can always reach for `crossbeam-channel`.
 
@@ -48,22 +52,22 @@ we could also improve the interface and enable new features:
    finally implement `Sync` for `Sender`.
 
 2. The other option is more radical: introduce `std::sync::channel` module
-   with the new implementation and a modern API. `std::sync::mpsc` becomes obsolete so
+   with the new implementation and a modern API. `std::sync::mpsc` then becomes obsolete so
    we'd probably want to deprecate it at some point.
 
 While the second option might seem a bit too far-reaching, I'll try to make a
 convincing case for it and demonstrate the benefits would be worth it.
 
 The summary of the argument is the following. The whole `mpsc` module is unnecessarily
-difficult to use, uses odd jargon, is generally a poor example of design in Rust,
+complicated to use, uses odd jargon, is generally a poor example of design in Rust,
 and if we were to do it from scratch today, we'd do it much differently. I personally
 even feel it'd be better to have *no* channels than keep `mpsc` as is - it is that bad!
 
 # Why have channels in `std` at all?
 
-It has sometimes been suggested we just deprecate `mpsc` and point users to external channel
+It has sometimes been suggested we deprecate `mpsc` and point users to external channel
 crates like `crossbeam-channel`. While this is a compelling option, I think in 2019
-channels are a fundamental synchronization primitive and we really do need them in the
+channels are a fundamental synchronization primitive, and we do need them in the
 standard library. They are basically as important as mutexes! Every modern programming
 language should have at least very basic channels in its concurrency kit.
 
@@ -71,16 +75,16 @@ And if we're going to have channels in the standard library, what should be the
 difference between those and channels in external crates? My position is the
 standard library's channels should focus on:
 
-* Simplicity. The interface must be lean and simple and the codebase must be
-  comprehensible. We don't want crazy optimizations that make the codebase
-  too difficult to maintain.
+* Simplicity. The interface must be lean and simple, and the codebase must be
+  understandable. We don't want crazy optimizations that make the codebase
+  too challenging to maintain.
 
-* Good performance. It doesn't have to be best-in-class, but has to be reasonable.
-  Simply wrapping a `VecDeque` inside a `Mutex` to make the queue concurrent
+* Good performance. It doesn't have to be best-in-class but has to be reasonable.
+  Just wrapping a `VecDeque` inside a `Mutex` to make the queue concurrent
   would be disappointing.
 
 * Fast compilation. The current implementation monomorphizes so much code you
-  can really notice `mpsc` increasing compilation times!
+  can notice `mpsc` increasing compilation times!
 
 # The "no-brainer" proposal
 
@@ -119,8 +123,8 @@ There will be some drawbacks, too, but they're relatively minor:
 
 # We can have multiple consumers now!
 
-The new implementation will incidentally also make it possible to trivially implement `Sync`
-and `Clone` for `Receiver`. Currently, if one wants to share the receiving side
+The new implementation will incidentally also make it possible to implement `Sync`
+and `Clone` for `Receiver` trivially. Currently, if one wants to share the receiving side
 of a channel, they have to jump through hoops.
 
 You can see this in the
@@ -130,8 +134,8 @@ we receive messages with `receiver.lock().unwrap().recv().unwrap()`. This is not
 code at all but makes sense since the "SC" part in "MPSC" stands for *single-consumer*.
 
 But why is `mpsc` a single-consumer channel anyway? Why didn't we go with
-multi-producer channels from the beginning? I haven't been involved with Rust
-at the time so cannot be certain about the real reason, but I'm pretty sure it boils down
+multi-consumer channels from the beginning? I haven't been involved with Rust
+at the time so cannot be completely sure about the real reason, but I believe it boils down
 to fast unbounded multi-consumer channels being difficult to implement without
 garbage collection.
 
@@ -155,8 +159,8 @@ by GC-related book-keeping. But this trick wasn't well-known when `mpsc` was cre
 # The API needs improvement
 
 Let's take a good look at the current API for `mpsc` channels. I'll omit iterators
-and error types since we designed them right and they're uninteresting for the sake of
-this analysis.
+and error types because we designed them right the first time and they're uninteresting
+for the sake of this analysis.
 
 There are three types that represent channels and two constructors:
 
@@ -206,8 +210,8 @@ superset of features. And really, there is no good reason why we need two distin
 sender types and a single receiver type. If we were to design channels from scratch
 today, I'm sure there would be just a single `Sender` type.
 
-As already mentioned, another issue with the API interface is the fact that `Sender`
-doesn't implement `Sync`, which will definitely be fixed by the new channel
+As already mentioned, another issue with this API is the fact that `Sender`
+doesn't implement `Sync`, which will be fixed by the new channel
 implementation.
 
 The third issue is the lack of `send_timeout` method on `SyncSender`, which would
@@ -230,9 +234,9 @@ Okay, so we're creating a new *transmitter* by cloning the *sender*
 side of a multi-*producer*... wait, that's three different words describing the
 same concept in a single line!
 
-Synonyms like that make it for a more painful user experience than it has to be,
+Synonyms like that make it for more painful user experience than it has to be,
 and we're just getting started. Let's take a complete tour through all the issues
-in the terminology used by `mpsc`.
+of the terminology used by `mpsc`.
 
 ### Synonyms, shorthands, acronyms
 
@@ -241,13 +245,13 @@ To make matters worse, in Servo, *senders* are called *chans* and
 *receivers* are called *ports*. That's a lot of words to remember.
 
 The shorthands for *sender* and *receiver* are *tx* and *rx*. Why not
-just use *s* and *r* instead? When I was learning Rust, I literally had to
+just use *s* and *r* instead? When I was learning Rust, I had to
 google for "tx", read an [article](https://en.wikipedia.org/wiki/TX) on Wikipedia to
 learn it stands for *transmission* in telecommunications, and then connect the dots
 to realize it's a synonym for *sender*.
 
 And what about the cryptic name `mpsc`? I can't count how many times I saw it
-misspelled as `mspc` or something of that sort. It's not really an acronym that
+misspelled as `mspc` or something of that sort. It's not an acronym that
 rolls off the tongue nor is it easy to remember. We could've named the module
 `chan` or `channel` instead.
 
@@ -263,7 +267,7 @@ Now let's see what these three types are called in various libraries.
 
 |   | Unbounded | Bounded | Zero-capacity |
 |---|-----------|---------|---------------|
-| Golang | N/A | asynchronous | synchronous |
+| Golang | N/A | asynchronous/buffered | synchronous/unbuffered |
 | `std::sync::mpsc` | asynchronous | synchronous | rendezvous |
 | `futures-channel` | unbounded | bounded | N/A | 
 | `crossbeam-channel` | unbounded | bounded | zero-capacity |
@@ -274,50 +278,51 @@ bounded channels as
 *synchronous when full* and Golang thinks of them as *asynchronous when not full*.
 Both of them are correct in their own ways, but this is a real mess.
 
-We're about to get async/await soon so I expect we'll start talking about asynchronous
+We're about to get async/await soon, so I expect we'll start talking about asynchronous
 channels in a completely different context, which will make the confusion even worse.
 
-And we're not done yet! Note that when we e.g. say `SyncSender` implements `Sync`, trait
+And we're not done yet! Note that when we, e.g. say `SyncSender` implements `Sync`, trait
 `Sync` has absolutely nothing to do with the prefix `Sync`. The `Sync` trait means
 it can be shared by reference across threads, while the `Sync` prefix means it's
 a bounded channel.
 
-We should've called channels *bounded* and *unbounded* instead - that way, there'd
+We should've called channels *bounded* and *unbounded* instead. That way, there'd
 be no chance of mistaking those words for anything else.
 
 ### Disconnect vs close
 
 When all senders or all receivers associated with a channel get dropped, the channel
-becomes *disconnected*, meaning no more messages can be sent into it. I think the
-use of word *disconnected* is perfectly fine here, but it's unfortunate how pretty much
+becomes *disconnected*, meaning no more messages can be sent into it. I think use
+of the word *disconnected* is perfectly fine here, but it's unfortunate how pretty much
 everywhere else channels get *closed* instead. While this may seem like a minor
 annoyance at worst, it's becoming more and more of a problem.
 
 First of all, within the codebase of `mpsc`, channels get *closed*. Only in the
 public documentation they get *disconnected*.
 
-In `crossbeam-channel`, I use *disconnected* only because `mpsc` uses the same,
+In `crossbeam-channel`, I use *disconnected* just because `mpsc` uses the same,
 but I'm seriously considering switching to *closed* before publishing version 1.0.
 
 In [Unix pipes](http://tldp.org/LDP/lpg/node11.html),
 [`ipc-channel`](https://docs.rs/ipc-channel/0.11.3/ipc_channel/ipc/enum.IpcSelectionResult.html#variant.ChannelClosed),
-[Go](https://gobyexample.com/closing-channels),
-and proposed [C++ queues](http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p0260r3.html#closed_queues),
-they get *closed*.
+[Go channels](https://gobyexample.com/closing-channels),
+[proposed C++ queues](http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p0260r3.html#closed_queues),
+and [Node.js streams](https://nodejs.org/api/stream.html#stream_event_close),
+*closed* is used.
 
 In [`futures-channel`](https://docs.rs/futures-channel-preview/0.3.0-alpha.13/futures_channel/mpsc/struct.Sender.html#method.disconnect),
 channels get *closed*, but senders and receivers can also be manually *disconnected*,
-which basically means handles become dangling and using them will result in a panic.
+which essentially means handles become "null" and using them will result in a panic.
 Therefore, *disconnect* in
 `mpsc` and in `futures-channel` does not mean the same thing at all, which is really confusing!
 
 Finally, *disconnected* is a bit longer than *closed* - consider
 `RecvTimeoutError::Disconnected`. That's wordy and not fun to type.
 
-# The "blank slate" proposal
+# The "clean slate" proposal
 
-If we're going to introduce new channels rather than try fixing `mpsc`, we
-can revamp the interface completely and avoid all the mistakes previously made.
+If we're going to introduce new channels rather than try fixing `mpsc`, let's
+revamp the interface entirely and avoid all the mistakes previously made.
 
 I suggest we take the following steps in that case:
 
@@ -327,8 +332,8 @@ I suggest we take the following steps in that case:
 4. Stabilize `std::sync::channel`.
 5. Phase out `mpsc` and nudge users towards `channel`.
 
-Here's what the new channels would look like. There is only a single sender type
-for bounded and unbounded channels:
+Here's how the new channels would look. There is only a single sender type
+for both bounded and unbounded channels:
 
 ```rust
 struct Sender<T> {}
@@ -338,7 +343,7 @@ fn unbounded<T>() -> (Sender<T>, Receiver<T>);
 fn bounded<T>(n: usize) -> (Sender<T>, Receiver<T>);
 ```
 
-Both `Sender` and `Receiver` implement all of `Clone`, `Send`, and `Sync`, so they
+`Sender` and `Receiver` implement all of `Clone`, `Send`, and `Sync`, so they
 can be shared across threads in any way you find most convenient:
 
 ```rust
@@ -371,17 +376,17 @@ impl<T> Receiver<T> {
 Note how beautifully symmetrical `Sender` and `Receiver` now are. And this API is more
 powerful than `mpsc` despite being smaller and simpler!
 
-The new channels would also use clearer terminology:
+The new channels would use clearer terminology:
 
 * There's no mention of *producers*, *consumers*, or *transmitters*.
 * Also no mention of *synchronous* and *asynchronous* channels - they are *bounded* and
-  *bounded* instead.
+  *unbounded* instead.
 * Senders and receivers are abbreviated as *s* and *r*.
 * Channels get *closed* rather than *disconnected*.
 
 If you'd like to see the full interface with examples, check out the
 [documentation](https://stjepang.github.io/doc/new_channel/index.html)
-generated from the prototype. And then compare that to the
+generated from the prototype and compare it to the
 [documentation](https://doc.rust-lang.org/std/sync/mpsc/index.html)
 for `mpsc` channels.
 
@@ -389,15 +394,15 @@ for `mpsc` channels.
 
 Despite all the flaws, the `mpsc` module is a brilliant piece of code
 and was one of the coolest and most advanced channel implementations at the time
-Rust 1.0 came out. But the state of the art has progressed since then and I believe
+Rust 1.0 came out. But state of the art has progressed since then and I believe
 it's time for it to go.
 
-Our terminology around `mpsc` channels is, honestly, a disaster. It's a hindrance for
-learning and I think the unnecessary clunkiness really paints a bad picture of Rust.
+Our terminology around `mpsc` channels is all over the place. It's a hindrance to
+learning, and I think the unnecessary clunkiness paints a bad picture of Rust.
 Now is a great chance to come up with a new
-and well-thought-out language for talking about channels that will get used throughout
+and well-thought-out language for talking about channels that will be adopted throughout
 the library ecosystem. Currently, every channel library has its own set of
-annoying inconsistencies, making the whole situation even worse.
+annoying inconsistencies deviating from others, making the whole situation even worse.
 
 I'm aware adding new APIs and removing old ones from the standard library is going to
 be painful. But my opinion is keeping the status quo is the worse scenario and
@@ -409,7 +414,7 @@ If we decide to transition to the new `channel` module, I promise to help by:
 * Writing clear instructions in the docs on how to switch from `mpsc` to `channel`.
 * Refreshing The Book with new idioms. Do we accept pull requests?
 * Updating the Rust Cookbook.
-* Pushing all channel libraries to follow suit by using naming consistent with the
+* Pushing all channel libraries to follow suit by using consistent naming with the
   new channels.
 
 And, of course, if we decide to stick with `mpsc`, I'll still swap the codebase for the new one
