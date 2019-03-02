@@ -22,7 +22,7 @@ The `mpsc` channels are not perfect. We have
 over some decisions made before their stabilization. Now could be a good time to
 revisit those decisions and consider fixing the mistakes.
 
-# The dilemma 
+## The dilemma 
 
 Just a quick reminder worth bringing up first. Unstable feature 
 [`mpsc_select`](https://github.com/rust-lang/rust/issues/27800)
@@ -63,7 +63,7 @@ complicated to use, uses odd jargon, is generally a poor example of design in Ru
 and if we were to do it from scratch today, we'd do it much differently. I personally
 even feel it'd be better to have *no* channels than keep `mpsc` as is - it is that bad!
 
-# Why have channels in `std` at all?
+## Why have channels in `std` at all?
 
 It has sometimes been suggested we deprecate `mpsc` and point users to external channel
 crates like `crossbeam-channel`. While this is a compelling option, I think in 2019
@@ -86,7 +86,7 @@ standard library's channels should focus on:
 * Fast compilation. The current implementation monomorphizes so much code you
   can notice `mpsc` increasing compilation times!
 
-# The "no-brainer" proposal
+## The "no-brainer" proposal
 
 If we're to keep `mpsc` as the channel module in `std`, then we should at
 least incorporate performance improvements from `crossbeam-channel` and
@@ -121,7 +121,7 @@ There will be some drawbacks, too, but they're relatively minor:
   that can't be used anymore. Unfortunately, this optimization also prevents `Sender`
   from implementing `Sync`.
 
-# We can have multiple consumers now!
+## We can have multiple consumers now!
 
 The new implementation will incidentally also make it possible to implement `Sync`
 and `Clone` for `Receiver` trivially. Currently, if one wants to share the receiving side
@@ -156,7 +156,7 @@ segments for a very short time. This keeps good scalability of channels, simplif
 the code, and even makes it faster in the typical case due to smaller overhead incurred
 by GC-related book-keeping. But this trick wasn't well-known when `mpsc` was created.
 
-# The API needs improvement
+## The API needs improvement
 
 Let's take a good look at the current API for `mpsc` channels. I'll omit iterators
 and error types because we designed them right the first time and they're uninteresting
@@ -220,7 +220,7 @@ why wouldn't there be a similar method on the sending side? I believe the omissi
 of this method is just an oversight and we don't have it only because nobody has
 implemented it yet.
 
-# Confusing terminology
+## Confusing terminology
 
 Here's a line of code from The Book, chapter
 [Message Passing](https://doc.rust-lang.org/book/ch16-02-message-passing.html),
@@ -319,7 +319,7 @@ Therefore, *disconnect* in
 Finally, *disconnected* is a bit longer than *closed* - consider
 `RecvTimeoutError::Disconnected`. That's wordy and not fun to type.
 
-# The "clean slate" proposal
+## The "clean slate" proposal
 
 If we're going to introduce new channels rather than try fixing `mpsc`, let's
 revamp the interface entirely and avoid all the mistakes previously made.
@@ -390,7 +390,7 @@ generated from the prototype and compare it to the
 [documentation](https://doc.rust-lang.org/std/sync/mpsc/index.html)
 for `mpsc` channels.
 
-# Conclusion
+## Conclusion
 
 Despite all the flaws, the `mpsc` module is a brilliant piece of code
 and was one of the coolest and most advanced channel implementations at the time
