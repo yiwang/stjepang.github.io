@@ -173,7 +173,7 @@ also possible for the whole program to get into a **deadlocked** state, unable
 to make any kind of progress!
 
 Finally, it’s worth adding that even plain memory access can be blocking! As
-an example, consder swap space, which can reside on a spinning disk. If a
+an example, consider swap space that resides on a spinning disk. If a
 thread is accessing swap space that is currently on the disk, it will have
 to block until that page is fetched from the physical disk and moved into
 the main memory.
@@ -188,7 +188,7 @@ try to eliminate it.
 When we anticipate blocking inside async code, we should consider offloading
 the blocking logic onto a different thread pool so that the executor can keep
 running without having to wait for it. Runtimes like `async-std` and `tokio`
-provide the [`**spawn_blocking()**`](https://docs.rs/async-std/1.2.0/async_std/task/fn.spawn_blocking.html)
+provide the **[`spawn_blocking()](https://docs.rs/async-std/1.2.0/async_std/task/fn.spawn_blocking.html)**
 function to help with that.
 
 To illustrate how the function is used, let’s take a look at how
