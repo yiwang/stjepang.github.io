@@ -238,7 +238,10 @@ The key takeaways are:
   `block_in_place()`.
 - Blocking is pervasive and it’s hard to isolate it completely.
 
-Furthermore, sometimes it’s hard to even say what code is blocking and what code isn’t. If a function takes 1 second to complete, we probably consider it a blocking one. But what if it takes 1 millisecond? Well, depends on the particular use case — sometimes we should considered that blocking and sometimes we shouldn't. It really depends!
+Furthermore, sometimes it’s hard to even say what code is blocking and what code isn’t.
+If a function takes 1 second to complete, we probably consider it a blocking one. But
+what if it takes 1 millisecond? Well, depends on the particular use case — sometimes
+we should consider that blocking and sometimes we shouldn't. It really depends!
 
 Blocking is scary and we need to defensively isolate it from async code.
 But there’s only so much we can do, and blocking will still inevitably creep
