@@ -64,8 +64,9 @@ fn bar() {}
 ```
 
 So in order to go from async to sync, we don’t have to do any extra steps - we
-just invoke the sync function and that’s it! Easy. Except... there’s something
-we need to be careful about.
+just invoke the sync function and that’s it! Easy. Except... we need to be
+careful about sync functions that take a long time to complete. We cannot call
+any sync code from the async world without giving it a second thought.
 
 ## Blocking hurts concurrency
 
