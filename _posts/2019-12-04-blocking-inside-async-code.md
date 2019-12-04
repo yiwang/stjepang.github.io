@@ -188,7 +188,7 @@ try to eliminate it.
 When we anticipate blocking inside async code, we should consider offloading
 the blocking logic onto a different thread pool so that the executor can keep
 running without having to wait for it. Runtimes like `async-std` and `tokio`
-provide the **[`spawn_blocking()](https://docs.rs/async-std/1.2.0/async_std/task/fn.spawn_blocking.html)**
+provide the **[`spawn_blocking()`](https://docs.rs/async-std/1.2.0/async_std/task/fn.spawn_blocking.html)**
 function to help with that.
 
 To illustrate how the function is used, let’s take a look at how
@@ -208,7 +208,7 @@ Note that we cannot pass a reference to `path` into the closure because the asyn
 
 Fortunately, Tokio has an alternative way of running blocking functions: it can execute the closure in-place and tell the current thread to stop being a part of the async executor and hand over that responsibility to a new thread. In a way, it’s the opposite of `spawn_blocking()` — instead of sending the closure to a new thread and continuing the event loop, we send the event loop to a new thread and continue running the closure.
 
-This is how [`**block_in_place()**`](https://docs.rs/tokio/0.2.2/tokio/task/fn.block_in_place.html)
+This is how **[`block_in_place()`](https://docs.rs/tokio/0.2.2/tokio/task/fn.block_in_place.html)**
 could be used to implement an async version of `read_to_string()`:
 
 ```rust
