@@ -22,7 +22,7 @@ I don’t know.
 
 There’s a growing split between sync and async libraries, examples being the
 [`std`](https://doc.rust-lang.org/std/) and
-[`async-std]`(https://docs.rs/async-std), which look very similar except one has
+[`async-std`](https://docs.rs/async-std), which look very similar except one has
 blocking functions (sync) and the other has non-blocking functions (async).
 We also have similar-looking libraries like [`surf`](https://docs.rs/surf) and
 [`attohttpc`](https://github.com/sbstp/attohttpc): both are HTTP clients except
