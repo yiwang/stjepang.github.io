@@ -25,19 +25,19 @@ Now let’s implement the missing `todo!()` part…
 
 ## First attempt
 
-Note that the [`poll`](https://doc.rust-lang.org/nightly/std/future/trait.Future.html#tymethod.poll) method on every [`Future`](https://doc.rust-lang.org/nightly/std/future/trait.Future.html) takes a pinned future. So we need to pin it first. While there is a way to do so safely using [`Box::pin()`](https://doc.rust-lang.org/nightly/std/future/trait.Future.html), we’d rather pin the future on the stack rather than heap.
+Note that the [`poll`](https://doc.rust-lang.org/nightly/std/future/trait.Future.html#tymethod.poll) method on every [`Future`](https://doc.rust-lang.org/nightly/std/future/trait.Future.html) takes a pinned future. So we need to pin it first. While there is a way to do that safely using [`Box::pin()`](https://doc.rust-lang.org/nightly/std/future/trait.Future.html), we’d rather pin the future on the stack than heap.
 
-Unfortunately, the only way of doing so safely right now is by using the `pin-utils` crate:
+Unfortunately, the only way of pinning futures on the stack safely is by using the `pin-utils` crate:
 
 ```rust
 pin_utils::pin_mut!(future);
 ```
 
-The [`pin_mut`](https://docs.rs/pin-utils/0.1.0-alpha.4/pin_utils/macro.pin_mut.html) macro will turn `future` from a variable of type `F` into one of type `Pin<&mut F>`.
+The [`pin_mut`](https://docs.rs/pin-utils/0.1.0-alpha.4/pin_utils/macro.pin_mut.html) macro converts `future` from a variable of type `F` into one of type `Pin<&mut F>`.
 
 Next we’ll need to specify what happens when this future is woken. In this case, waking should simply unblock the thread running the future.
 
-Constructing a `Waker` can be gnarly — just take a peek at the [implementation](https://docs.rs/extreme/666.666.666666/src/extreme/lib.rs.html) of `extreme`. And this is the simplest possible way of constructing a `Waker` by hand! So many raw pointers, so much unsafe code… why don't we skip this part for now and fill in the blank later?
+Constructing a `Waker` can be gnarly — just take a peek at the [implementation](https://docs.rs/extreme/666.666.666666/src/extreme/lib.rs.html) of `extreme`. And this is the simplest possible way of constructing a `Waker` by hand! So many raw pointers, so much unsafe code… let's skip this part for now and fill in the blank later.
 
 ```rust
 let waker = todo!();
@@ -56,13 +56,13 @@ loop {
 }
 ```
 
-If you’re wondering what [`Context`](https://doc.rust-lang.org/nightly/std/task/struct.Context.html) is, it’s a wrapper around `Waker` — there’s nothing more to it. When async/await in Rust was being designed, we weren’t sure if it’d be useful to pass anything else besides a `Waker` to `poll()` so we came up with this wrapper that might hold more stuff in the future.
+In case you're puzzled by the [`Context`](https://doc.rust-lang.org/nightly/std/task/struct.Context.html) type, it’s a wrapper around `Waker` — there’s nothing more to it. When async/await in Rust was being designed, we weren’t sure if it’d be useful to pass anything else besides a `Waker` to `poll()` so we came up with this wrapper that might hold more stuff in a future version of Rust.
 
-Anyways… we’re almost done. Let’s get back to waker construction and fill in the blank marked with `todo!()`.
+Anyways… we’re almost done. Let’s go back to waker construction and fill in the blank marked with `todo!()`.
 
-If you think about it, `Waker` is really just a carefully optimized, fancy version of  `Arc<dyn Fn() + Send + Sync>` , and [`wake()`](https://doc.rust-lang.org/nightly/std/task/struct.Waker.html#method.wake) invokes this function. Put another way, a `Waker` is a callback that gets invoked whenever the future can continue execution.
+If you think about it, `Waker` is really just a carefully optimized, fancy version of  `Arc<dyn Fn() + Send + Sync>` , and [`wake()`](https://doc.rust-lang.org/nightly/std/task/struct.Waker.html#method.wake) invokes this function. Also put yet another way, a `Waker` is a callback that gets invoked whenever the future can continue execution.
 
-Since `Waker` is so difficult to construct, [sagebind](https://github.com/sagebind) came up [`waker_fn()`](https://docs.rs/wakeful/0.1.1/wakeful/fn.waker_fn.html), a straightforward way to convert a function into a `Waker`. Unfortunately, `wakeful` seems to be yanked at the moment, so I stole `waker_fn()` and put into my crate `async-task`.
+Since `Waker` is so difficult to construct, [sagebind](https://github.com/sagebind) came up [`waker_fn()`](https://docs.rs/wakeful/0.1.1/wakeful/fn.waker_fn.html), a straightforward way to convert any function into a `Waker`. Unfortunately, `wakeful` seems to be yanked at the moment, so I borrowed `waker_fn()` and put it into my crate `async-task`.
 
 In our `block_on`, the callback unblocks the thread running the future:
 
@@ -73,7 +73,7 @@ let waker = async_task::waker_fn(move || thread.unpark());
 
 So simple! Much better than fiddling with [`RawWaker`](https://doc.rust-lang.org/nightly/std/task/struct.RawWaker.html) and [`RawWakerVTable`](https://doc.rust-lang.org/nightly/std/task/struct.RawWakerVTable.html).
 
-The `waker_fn()` constructor literally creates an `Arc<impl Fn() + Send + Sync>` and then converts it into `Waker` with unsafe code that looks similar to what we saw in `extreme`.
+Internally, the `waker_fn()` constructor literally creates an `Arc<impl Fn() + Send + Sync>` and then converts it into `Waker` with unsafe code that looks similar to what we saw in `extreme`.
 
 Here’s a complete implementation of `block_on()`:
 
@@ -98,11 +98,11 @@ See [`v1.rs`](https://github.com/stjepang/byo-block-on/blob/master/examples/v1.r
 
 ## A problem with parking
 
-But, it’s not time to celebrate yet. There’s a problem. If user code inside the future also makes use of the park/unpark API, it may pick up and “steal” unpark notifications from the callback. See [here](https://github.com/rust-lang/futures-rs/pull/2010) for a more elaborate explanation.
+But, it’s not time to celebrate yet. There’s a problem. If user code inside the future also makes use of the park/unpark API, it may pick up and “steal” unpark notifications from the callback. Read [this issue](https://github.com/rust-lang/futures-rs/pull/2010) for a more elaborate explanation.
 
-A possible solution is to use a way of parking and unparking threads different from the one inside the [`std::thread`](https://doc.rust-lang.org/nightly/std/thread/index.html) module. That way, code inside the future will not be able to interfere.
+A possible solution is to use a way of parking and unparking threads different from the one inside the [`std::thread`](https://doc.rust-lang.org/nightly/std/thread/index.html) module. That way, code inside the future will not be able to interfere with waking.
 
-There’s a very similar park/unpark mechanism in `crossbeam`, except it allows us to create arbitrarily many independent parkers rather than having one per thread. Let’s create one per invocation of `block_on()`:
+There’s a very similar park/unpark mechanism in `crossbeam`, except it allows us to create arbitrarily many independent [parkers](https://docs.rs/crossbeam/0.7.3/crossbeam/sync/struct.Parker.html) rather than having one per thread. Let’s create one per invocation of `block_on()`:
 
 ```rust
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -128,9 +128,9 @@ See [`v2.rs`](https://github.com/stjepang/byo-block-on/blob/master/examples/v2.r
 
 ## A caching optimization
 
-Creating a [`Parker`](https://docs.rs/crossbeam/0.7.3/crossbeam/sync/struct.Parker.html) and `Waker` is not free — both of those incur the cost of an allocation, which is unfortunate. Can we improve that?
+Creating a [`Parker`](https://docs.rs/crossbeam/0.7.3/crossbeam/sync/struct.Parker.html) and `Waker` is not free — both of those incur the cost of an allocation, which is unfortunate. Can we improve?
 
-Instead of constructing a `Parker`  and `Waker` per invocation of `block_on`, why not cache them in thread-local storage? That way a thread will reuse the same instances across all invocations of `block_on()`:
+Instead of constructing a `Parker`  and `Waker` on each invocation of `block_on`, why not cache them in thread-local storage? That way a thread will reuse the same instances across all invocations of `block_on()`:
 
 ```rust
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -165,9 +165,9 @@ See [`v3.rs`](https://github.com/stjepang/byo-block-on/blob/master/examples/v3.r
 
 Are we done yet? Well… just one more last thing.
 
-What if the future inside `block_on()` recursively calls `block_on()` again? We can either permit or forbid recursion.
+What if the future inside `block_on()` calls `block_on()` again recursively? We can either permit or forbid recursion.
 
-If we choose to permit recursion, then we need to make sure recursive calls of `block_on()`  don’t share the same `Parker` and `Waker` instance, or else there’s no way to tell which `block_on()` invocation is woken.
+If we choose to permit recursion, then we also need to make sure recursive calls of `block_on()`  don’t share the same `Parker` and `Waker` instances, or else there’s no way to tell which `block_on()` invocation gets woken.
 
 The `block_on()` from the `futures` crate panics on recursive invocations of `block_on()`. I don’t have a strong opinion on whether permitting or forbidding recursion is better — both behaviors are sensible. But, since we’re mimicking the `futures` version, let’s forbid recursion.
 
@@ -241,7 +241,7 @@ fn custom_block_on_10_yields(b: &mut Bencher) {
 }
 ```
 
-Let’s make a set of three benchmarks with futures yielding 0, 10, and 50 times. Then we run those using our custom `block_on()` and then using `block_on()` from `futures`. You can find the full benchmark code in [`yield.rs`](https://github.com/stjepang/byo-block-on/blob/master/benches/yield.rs).
+Let’s make a set of three benchmarks with futures yielding 0, 10, and 50 times. We run those using our custom `block_on()` and then using `block_on()` from `futures`. You can find the full benchmark code in [`yield.rs`](https://github.com/stjepang/byo-block-on/blob/master/benches/yield.rs).
 
 And here are the results on my machine:
 
@@ -257,12 +257,12 @@ test futures_block_on_10_yields ... bench:         236 ns/iter (+/- 10)
 test futures_block_on_50_yields ... bench:       1,139 ns/iter (+/- 30)
 ```
 
-The numbers say our custom `block_on()` is roughly 2 or 3 times faster in this particular benchmark. Not bad at all!
+The numbers say our custom `block_on()` is roughly 2 or 3 times faster in this particular benchmark, which is not bad at all!
 
 ## Conclusion
 
 Async Rust can feel intimidating because it contains so much machinery: the `Future` trait, pining, the `Context` type, `Waker` and its friends `RawWaker` and `RawWakerVTable`, desugaring of `async` and `await`, unsafe code, raw pointers, and so on.
 
-But the thing is, a lot of the ugly stuff is not that important — it’s really just boring boilerplate that can be removed with crates like `pin-utils`, `async-task`, and `crossbeam`.
+But the thing is, a lot of the ugly stuff is not even that important — it’s really just boring boilerplate that can be removed with crates like `pin-utils`, `async-task`, and `crossbeam`.
 
-And indeed, today we managed to build an efficient `block_on()` in few lines of safe code without having to understand most of that boilerplate. In another blog post, we’ll also build a real executor…
+And indeed, today we managed to build an efficient `block_on()` in few lines of safe code without having to understand most of that boilerplate. In another blog post, we’ll build a real executor…
