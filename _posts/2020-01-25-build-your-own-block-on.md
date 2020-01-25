@@ -5,7 +5,7 @@ title:  "Build your own block_on()"
 
 If you’ve ever wondered how [`block_on`](https://docs.rs/futures/0.3.1/futures/executor/fn.block_on.html) from the [`futures`](https://docs.rs/futures) crate works, today we are going to write our own version of the function.
 
-Inspiration for this blog post comes from two crates, [`wakeful`](https://docs.rs/wakeful) and [`extreme`](https://docs.rs/extreme). `wakeful` has devised a simple way to create a [`Waker`](https://doc.rust-lang.org/nightly/std/task/struct.Waker.html) from a function, while `extreme` is an extremely terse implementation of `block_on()`.
+Inspiration for this blog post comes from two crates, [`wakeful`](https://docs.rs/wakeful) and [`extreme`](https://github.com/spacejam/extreme). `wakeful` has devised a simple way to create a [`Waker`](https://doc.rust-lang.org/nightly/std/task/struct.Waker.html) from a function, while `extreme` is an extremely terse implementation of `block_on()`.
 
 Our implementation will have slightly different goals from `extreme`. Rather than going for zero dependencies and minimal number of lines of code, we’ll go for a safe and efficient but still pretty simple implementation.
 
