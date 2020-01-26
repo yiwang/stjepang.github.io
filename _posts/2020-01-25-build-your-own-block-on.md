@@ -261,7 +261,7 @@ The numbers say our custom `block_on()` is roughly 2 or 3 times faster in this p
 
 ## Conclusion
 
-Async Rust can feel intimidating because it contains so much machinery: the `Future` trait, pining, the `Context` type, `Waker` and its friends `RawWaker` and `RawWakerVTable`, desugaring of `async` and `await`, unsafe code, raw pointers, and so on.
+Async Rust can feel intimidating because it contains so much machinery: the `Future` trait, pinning, the `Context` type, `Waker` and its friends `RawWaker` and `RawWakerVTable`, desugaring of `async` and `await`, unsafe code, raw pointers, and so on.
 
 But the thing is, a lot of the ugly stuff is not even that important — it’s really just boring boilerplate that can be removed with crates like `pin-utils`, `async-task`, and `crossbeam`.
 
