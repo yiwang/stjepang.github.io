@@ -252,7 +252,7 @@ And that’s all. Done! We have a real executor now — see the complete impleme
 
 ## A touch of magic
 
-If you found the `Task` struct and its state transitions complicated, I feel you. But there are good news. You’ll be relieved to hear none of that mess needs to be done by hand because `async-task` can do it for us!
+If you found the `Task` struct and its state transitions intimidating, I feel you. But there is good news. You’ll be relieved to hear none of that mess needs to be done by hand because `async-task` can do it for us!
 
 We basically need to replace `Arc<Task>` with [`async_task::Task<()>`](https://docs.rs/async-task/1.3.0/async_task/struct.Task.html) and replace the oneshot channel with [`async_task::JoinHandle<()>`](https://docs.rs/async-task/1.3.0/async_task/struct.JoinHandle.html).
 
