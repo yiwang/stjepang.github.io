@@ -51,7 +51,7 @@ type JoinHandle<R> = Pin<Box<dyn Future<Output = R> + Send>>;
 
 This works for now but don’t fret, later on we’ll rewrite it cleanly as a fresh `struct` and implement `Future` for it manually.
 
-The output of the future has to be sent to `JoinHandle` somehow. One way to do that is to create a [oneshot channel](https://docs.rs/futures/0.3.1/futures/channel/oneshot/index.html) and send the output through the channel when the future completes. The `JoinHandle` is then a future that awaits a message from the channel:
+The output of the spawned future has to be sent to `JoinHandle` somehow. One way to do that is to create a [oneshot channel](https://docs.rs/futures/0.3.1/futures/channel/oneshot/index.html) and send the output through the channel when the future completes. The `JoinHandle` is then a future that awaits a message from the channel:
 
 ```rust
 use futures::channel::oneshot;
@@ -72,14 +72,14 @@ where
 }
 ```
 
-The next step is allocating a future on the heap and pushing it into some kind of global task queue so that it gets processed by the executor. We call an allocated future a *task*.
+The next step is allocating the wrapper future on the heap and pushing it into some kind of global task queue so that it gets processed by the executor. We call such an allocated future a *task*.
 
 
 ## The anatomy of a task
 
 A task consists of a future and its state. We need to keep track of the state to know whether the task is scheduled for running, whether it is currently running, whether it has completed, and so on.
 
-Here’s a definition of the `Task` type:
+Here’s the definition for our `Task` type:
 
 ```rust
 struct Task {
@@ -88,7 +88,7 @@ struct Task {
 }
 ```
 
-We haven’t decided yet what exactly `state` is, but it will be some kind of `AtomicUsize` that can be updated from any thread. Let’s figure that out later.
+We haven’t decided yet what exactly `state` is, but it will be some kind of [`AtomicUsize`](https://doc.rust-lang.org/nightly/std/sync/atomic/struct.AtomicUsize.html) that can be updated from any thread. Let’s figure that out later.
 
 The output type of the future is `()` — that is because the `spawn()` function has wrapped the original future into one that sends the output into the oneshot channel and then simply returns with `()`.
 
@@ -121,7 +121,7 @@ where
 }
 ```
 
-Once the task is created, we push it into `QUEUE`, the global queue containing runnable tasks. The `spawn()` function is now complete, so we let’s define `QUEUE` next…
+Once the task is allocated, we push it into `QUEUE`, the global queue containing runnable tasks. The `spawn()` function is now complete, so let’s define `QUEUE` next…
 
 
 ## Executor threads
@@ -146,11 +146,11 @@ static QUEUE: Lazy<channel::Sender<Arc<Task>>> = Lazy::new(|| {
 });
 ```
 
-Pretty simple — each executor thread is literally a one-liner! So the task queue is an unbounded channel, while executor threads receive tasks from the channel and run each one of them.
+Pretty simple — an executor thread is literally a one-liner! So the task queue is an unbounded channel, while executor threads receive tasks from this channel and run each one of them.
 
 The number of executor threads equals the number of cores on the system, which is retrieved by the `num_cpus` crate.
 
-Now that we have the task queue and a thread pool, let’s implement the `run()` method for tasks.
+Now that we have the task queue and a thread pool, the last missing piece to implement is the `run()` method.
 
 
 ## Task execution
@@ -170,22 +170,22 @@ impl Task {
 }
 ```
 
-Note that we need to lock the future to get mutable access and poll it. We’ll also make sure no other thread holds the lock at the same time, so `try_lock()` must always succeed.
+Note that we need to lock the future to get mutable access and poll it. By design, no other thread will hold the lock at the same time, so `try_lock()` must always succeed.
 
-But how do we create a waker? We’re going to use [`async_task::waker_fn()`](https://docs.rs/async-task/1.3.0/async_task/fn.waker_fn.html) like last time, but what is the wake function supposed to do?
+But how do we create a waker? We’re going to use [`async_task::waker_fn()`](https://docs.rs/async-task/1.3.0/async_task/fn.waker_fn.html) like the last time, but what is the wake function supposed to do?
 
 We can’t push an `Arc<Task>` into `QUEUE` just like that. Here are potential race conditions we should think about:
 
 
-- What if a task completes and is then woken? Note that a `Waker` can outlive its associated future. We don’t want completed tasks in the queue.
+- What if a task completes and is then woken? A `Waker` can outlive its associated future, and we don’t want to end up with completed tasks in the queue.
 - What if a task is woken twice in a row before it gets run? We don’t want to have two references to the same task in the queue.
 - What if a task is woken while it’s running? If we push a reference to it into the queue, another executor thread might take it and attempt to run it at the same time.
 
-If we think hard about it, there are in fact two simple rules that solve all of these problems elegantly:
+If we think hard about it, we come up with two simple rules that solve all of these problems elegantly:
 
 
 1. The wake function schedules the task if it wasn’t woken already and if it’s not currently running.
-2. If the task was woken while it was running, the executor thread needs to reschedule it.
+2. If the task was woken while it was running, the executor thread reschedules it.
 
 Let's sketch these rules out:
 
@@ -193,7 +193,7 @@ Let's sketch these rules out:
 impl Task {
     fn run(self: Arc<Task>) {
         let waker = async_task::waker_fn(|| {
-            todo!("schedule if the task is not woken already or running");
+            todo!("schedule if the task is not woken already and is not running");
         });
 
         let cx = &mut Context::from_waker(&waker);
@@ -204,7 +204,7 @@ impl Task {
 }
 ```
 
-Remember the `state` field of type  `AtomicUsize` we defined inside `Task`? Now is the time to store some useful data in it. There are two pieces of information we care about tasks that will help us implement the waker:
+Remember the `state` field of type  `AtomicUsize` we defined inside `Task`? Now is the time to store some useful data in it. There are two pieces of information we care about tasks that will help us implement waking:
 
 1. Has the task been woken already?
 2. Is the task currently running?
@@ -216,7 +216,7 @@ const WOKEN: usize = 0b01;
 const RUNNING: usize = 0b10;
 ```
 
-The wake function sets the `WOKEN` bit. If both bits have previously been 0 (i.e. the task was neither woken nor running), then we schedule the task by pushing a task reference into the queue:
+The wake function sets the `WOKEN` bit. If both bits have previously been 0 (i.e. the task was neither woken nor running), then we schedule the task by pushing its reference into the queue:
 
 ```rust
 let task = self.clone();
@@ -235,7 +235,7 @@ let cx = &mut Context::from_waker(&waker);
 let poll = self.future.try_lock().unwrap().as_mut().poll(cx);
 ```
 
-After polling the future, we unset the `RUNNING` bit and check if the previous state had bits `WOKEN` and `RUNNING` (i.e. the task was woken while running). If so, we reschedule the task:
+After polling the future, we unset the `RUNNING` bit and check if the previous state had bits `WOKEN` and `RUNNING` set (i.e. the task was woken while running). If so, we reschedule the task:
 
 ```rust
 if poll.is_pending() {
@@ -252,7 +252,7 @@ And that’s all. Done! We have a real executor now — see the complete impleme
 
 ## A touch of magic
 
-If you found the `Task` struct and its state transitions complicated, I feel you. But there are good news! You’ll be relieved to hear that none of that mess needs to be done by hand because `async-task` can do it for us!
+If you found the `Task` struct and its state transitions complicated, I feel you. But there are good news. You’ll be relieved to hear none of that mess needs to be done by hand because `async-task` can do it for us!
 
 We basically need to replace `Arc<Task>` with [`async_task::Task<()>`](https://docs.rs/async-task/1.3.0/async_task/struct.Task.html) and replace the oneshot channel with [`async_task::JoinHandle<()>`](https://docs.rs/async-task/1.3.0/async_task/struct.JoinHandle.html).
 
@@ -277,7 +277,7 @@ The [`async_task::spawn()`](https://docs.rs/async-task/1.3.0/async_task/fn.spawn
 
 - The spawned future.
 - A schedule function that pushes the task into the queue. This function will be invoked either by the waker or by the `run()` method after polling the future.
-- An arbitrary piece of metadata called *tag* that is kept inside the task. Let’s not worry about it in this blog post and simply store `()` in it, i.e. nothing.
+- An arbitrary piece of metadata called *tag* that is kept inside the task. Let’s not worry about it in this blog post and simply store `()` as the tag, i.e. nothing.
 
 The constructor then returns two values:
 
@@ -314,14 +314,14 @@ where
 
 The complete code can be found in [`v2.rs`](https://github.com/stjepang/byo-executor/blob/master/examples/v2.rs).
 
-The benefit of using `async_task::spawn()` here is not just simplicity. It is also more efficient than hand-rolling our own `Task` as well as more robust. Just to name one instance of robustness, `async_task::Task` drops the future immediately after the future completes rather than after all task references are dropped.
+The benefit of using `async_task::spawn()` here is not just simplicity. It is also more efficient than hand-rolling our own `Task` as well as more robust. Just to name one example of robustness, `async_task::Task` drops the future immediately after it completes rather than when all task references get dropped.
 
-In addition to that, `async-task` offers useful features like [tags](https://docs.rs/async-task/1.3.0/async_task/struct.Task.html#method.tag) and [cancellation](https://docs.rs/async-task/1.3.0/async_task/struct.Task.html#method.cancel), but let’s not talk about those today. It’s also worth mentioning `async-task` is a [`#[no_std`]](https://docs.rs/async-task/1.3.0/src/async_task/lib.rs.html#116) [crate](https://docs.rs/async-task/1.3.0/src/async_task/lib.rs.html#116) that can even be used without the standard library.
+In addition to that, `async-task` offers useful features like [tags](https://docs.rs/async-task/1.3.0/async_task/struct.Task.html#method.tag) and [cancellation](https://docs.rs/async-task/1.3.0/async_task/struct.Task.html#method.cancel), but let’s not talk about those today. It’s also worth mentioning `async-task` is a [`#[no_std]`](https://docs.rs/async-task/1.3.0/src/async_task/lib.rs.html#116) [crate](https://docs.rs/async-task/1.3.0/src/async_task/lib.rs.html#116) that can even be used without the standard library.
 
 
 ## Improved JoinHandle
 
-If you look at our latest executor closely, there is one glaring instance of inefficiency - a redundant `Box::pin()` allocation for the join handle.
+If you look at our latest executor closely, there is one remaining instance of inefficiency - the redundant `Box::pin()` allocation for the join handle.
 
 It’d be great if we could use the following type alias, but we can’t because `async_task::JoinHandle<R>` outputs `Option<R>`, whereas our `JoinHandle<R>` outputs `R`:
 
@@ -353,7 +353,7 @@ The complete executor implementation can be found in [`v3.rs`](https://github.co
 
 So far we haven’t really thought much about what happens when a task panics, i.e. when a panic occurs inside an invocation of [`poll()`](https://doc.rust-lang.org/nightly/std/future/trait.Future.html#tymethod.poll). Right now, the `run()` method simply propagates the panic into the executor. We should think whether this is what we really want.
 
-It’d be wise to handle those panics somehow. For example, we could simply ignore panics and move on. That way, they are still printed on the screen but won’t crash the whole process — the same thing happens when a thread panics.
+It’d be wise to handle those panics somehow. For example, we could simply ignore panics and move on. That way, they are still printed on the screen but won’t crash the whole process — panicking threads work exactly the same way.
 
 To ignore panics, we wrap `run()` into [`catch_unwind()`](https://doc.rust-lang.org/nightly/std/panic/fn.catch_unwind.html):
 
@@ -384,7 +384,7 @@ There are many sensible panic handling strategies. Here are some strategies prov
 - [Propagate panics](https://github.com/async-rs/async-task/blob/master/examples/panic-propagation.rs#L64) — panics are re-thrown into the task that awaits the `JoinHandle<R>`.
 - [Output panics](https://github.com/async-rs/async-task/blob/master/examples/panic-result.rs#L39) — the `JoinHandle<R>` outputs [`std::thread::Result<R>`](https://doc.rust-lang.org/nightly/std/thread/type.Result.html).
 
-It’s easy to implement any kind of panic handling strategy you want. And it’s totally up to you to choose one!
+It’s easy to implement any kind of panic handling strategy you want. And it’s totally up to you to decide which one is best!
 
 
 ## How fast is this executor?
@@ -404,9 +404,9 @@ I’ll talk more about work stealing in another blog post.
 
 *Concurrency is hard*, everybody is telling us. The Go language provides a built-in race detector, `tokio` has [created its own](https://tokio.rs/blog/2019-10-scheduler/#fearless-unsafe-concurrency-with-loom) concurrency checker, [`loom`](https://github.com/tokio-rs/loom), to look for concurrency bugs, and `crossbeam` has in some cases even resorted to formal proofs. Sounds scary!
 
-But we can just sit back and not worry about it. None of the race detectors, sanitizers, or even [`miri`](https://github.com/rust-lang/miri) and `loom`, can catch bugs in our executor. The reason is that we have only written safe code, and safe code is memory safe, i.e. it can’t contain data races. Rust’s type system has already proven our executor correct.
+But we can just relax, sit back, and not worry about it. None of the race detectors, sanitizers, or even [`miri`](https://github.com/rust-lang/miri) or `loom`, can catch bugs in our executor. The reason is that we have only written safe code, and safe code is memory safe, i.e. it can’t contain data races. Rust’s type system has already proven our executor correct.
 
-The burden of ensuring memory safety is entirely on the dependencies, more specifically `async-task` and `crossbeam`. Rest assured, both take correctness very seriously. `async-task` has an [extensive test suite](https://github.com/async-rs/async-task/tree/master/tests) covering all the edge cases,  `crossbeam`'s channel has [lots of tests](https://github.com/crossbeam-rs/crossbeam/tree/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-channel/tests) and even passes the [Go](https://github.com/crossbeam-rs/crossbeam/blob/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-channel/tests/golang.rs) and [`std::sync::mpsc`](https://github.com/crossbeam-rs/crossbeam/blob/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-channel/tests/mpsc.rs) test suites, work-stealing deque is based on a [formally proven](https://fzn.fr/readings/ppopp13.pdf) implementation, while epoch-based GC has a [proof](https://github.com/crossbeam-rs/rfcs/blob/master/text/2017-07-23-relaxed-memory.md) of correctness.
+The burden of ensuring memory safety is entirely on the dependencies, more specifically `async-task` and `crossbeam`. Rest assured, both take correctness very seriously. `async-task` has an [extensive test suite](https://github.com/async-rs/async-task/tree/master/tests) covering all the edge cases,  `crossbeam`'s channel has [lots of tests](https://github.com/crossbeam-rs/crossbeam/tree/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-channel/tests) and even passes the [Go](https://github.com/crossbeam-rs/crossbeam/blob/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-channel/tests/golang.rs) and [`std::sync::mpsc`](https://github.com/crossbeam-rs/crossbeam/blob/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-channel/tests/mpsc.rs) test suites, work-stealing deque is based on a [formally proven](https://fzn.fr/readings/ppopp13.pdf) implementation, while epoch-based garbage collector has a [proof of correctness](https://github.com/crossbeam-rs/rfcs/blob/master/text/2017-07-23-relaxed-memory.md).
 
 
 ## Executors are for everyone
@@ -420,4 +420,6 @@ However, that was a white lie — it took us *years* till we actually got single
 
 Then, [in August 2019](https://github.com/async-rs/async-task/releases/tag/v1.0.0), `async-task` was [announced](https://async.rs/blog/announcing-async-std/). For the first time ever, we managed to squash the future, task state, and a channel into just a single allocation. The reason why it took us so long is because manual allocation and managing state transitions inside tasks is [incredibly complicated](https://github.com/async-rs/async-task/tree/master/src). But now that it’s been done, you don’t have to worry about any of it ever again.
 
-Soon after that, in [October 2019](https://github.com/tokio-rs/tokio/pull/1657), `tokio` also [adopted the same approach](https://tokio.rs/blog/2019-10-scheduler/#reducing-allocations) with an [implementation](https://github.com/tokio-rs/tokio/tree/1c117fb7fd3ca398ca53ff676485b12cbb08557a/tokio-executor/src/task) similar to `async-task`. These days, anyone can [trivially](https://github.com/async-rs/async-task/blob/master/examples/spawn.rs) build an efficient executor with single-allocation tasks. What used to be rocket science now isn’t anymore.
+Soon after that, in [October 2019](https://github.com/tokio-rs/tokio/pull/1657), `tokio` also [adopted the same approach](https://tokio.rs/blog/2019-10-scheduler/#reducing-allocations) with an [implementation](https://github.com/tokio-rs/tokio/tree/1c117fb7fd3ca398ca53ff676485b12cbb08557a/tokio-executor/src/task) similar to `async-task`.
+
+These days, anyone can [trivially](https://github.com/async-rs/async-task/blob/master/examples/spawn.rs) build an efficient executor with single-allocation tasks. What used to be rocket science now isn’t anymore.
