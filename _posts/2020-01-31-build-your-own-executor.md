@@ -284,7 +284,7 @@ The constructor then returns two values:
 - An `async_task::Task<()>`. The `()` type is the tag.
 - An `async_task::JoinHandle<R, ()>`. Again, the `()` type is the tag. This join handle is a `Future` that outputs `Option<R>`, where the output of `None` indicates the task has panicked or got cancelled.
 
-If you're wondering about the [`schedule()`](https://docs.rs/async-task/1.3.0/async_task/struct.Task.html#method.schedule) method, it just invokes the schedule function on the task to push it in the queue. We could've also pushed the `task` into `QUEUE` by ourselves - the end result is the same.
+If you're wondering about the [`schedule()`](https://docs.rs/async-task/1.3.0/async_task/struct.Task.html#method.schedule) method, it just invokes the schedule function on the task to push it into the queue. We could've also pushed the `task` into `QUEUE` by ourselves - the end result is the same.
 
 Putting all pieces together, we end up with this remarkably simple executor:
 
