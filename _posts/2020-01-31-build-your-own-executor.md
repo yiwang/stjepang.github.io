@@ -393,7 +393,7 @@ It’s easy to implement any kind of panic handling strategy you want. And it’
 
 The current code is short, simple, and safe. But how fast is it?
 
-Tasks allocated by `async_task::spawn()` are just a single allocation storing the task state, the future, and the output of the future when it completes. There are no other hidden costs — spawning is virtually as fast as it can possibly be!
+A task allocated by `async_task::spawn()` is just a single allocation storing the task state, the future, and the output of the future when it completes. There are no other hidden costs — spawning is virtually as fast as it can possibly be!
 
 Other executors like `async-std` and `tokio` allocate tasks exactly the same way. The basis for our executor is essentially an optimal implementation, and now we’re just one step away from being competitive with popular executors: work stealing.
 
