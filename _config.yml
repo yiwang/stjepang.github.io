@@ -17,7 +17,7 @@ title: Stjepan's blog
 author: Stjepan Glavina
 # email: your-email@example.com
 description: > # this means to ignore newlines until "baseurl:"
-  async-std, Crossbeam, Rust 🦀
+  Ferrous Systems
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "" # the base hostname & protocol for your site, e.g. http://example.com
 twitter_username: stjepang
